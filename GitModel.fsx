@@ -5,10 +5,9 @@ type TimeInfo =
     override this.ToString() =
         let prefix = if this.timezoneOffset.Ticks >= 0 then "+" else "-"
         let span = this.timezoneOffset.ToString("hhmm")
-        sprintf "%i %s%s" this.unixTimestamp prefix span
+        $"{this.unixTimestamp} {prefix}{span}"
 
 let getTimeInfo () =
-
     let unixTimestamp =
         let now = System.DateTime.Now
         let start = System.DateTime(1970, 1, 1, 0, 0, 0, System.DateTimeKind.Utc)
@@ -23,7 +22,7 @@ type User =
     { name: string
       email: string }
 
-    override this.ToString() : string = sprintf "%s <%s>" this.name this.email
+    override this.ToString() : string = $"{this.name} <{this.email}>"
 
 type Id<'T> =
     | Id of byte array
@@ -33,7 +32,7 @@ type Id<'T> =
             match this with
             | Id bytes -> bytes
 
-        bytes |> Array.fold (fun str byte -> str + sprintf "%02X" byte) ""
+        bytes |> Array.fold (fun str byte -> str + $"%02X{byte}") ""
 
 type Blob = { content: string }
 
@@ -99,31 +98,31 @@ let rec store object =
                     | EntryId.BlobId(Id id)
                     | EntryId.TreeId(Id id) -> id |> string
 
-                sprintf "%i %s\0%s" kind entry.name id)
+                $"{kind} {entry.name}\x00{id}")
             |> List.fold (fun str child -> str + child) ""
         | Blob blob -> blob.content
         | Commit commit ->
             let tree =
                 let treeId = Tree commit.tree |> store
-                sprintf "tree %s\n" treeId
+                $"tree {treeId}\n"
 
             let parents =
                 commit.parent
-                |> List.map (fun id -> id |> sprintf "parent %O")
+                |> List.map (fun id -> $"parent {id}")
                 |> List.fold (fun str parent -> str + parent + "\n") ""
 
             let author =
                 let (user, time) = commit.authorInfo
-                sprintf "author %O %O\n" user time
+                $"author {user} {time}\n"
 
             let committer =
                 let (user, time) = commit.committerInfo
-                sprintf "committer %O %O\n" user time
+                $"committer {user} {time}\n"
 
             let message = commit.message + "\n"
             tree + parents + author + committer + "\n" + message
         | Tag tag ->
-            let object = tag.id |> sprintf "object %O\n"
+            let object = $"object {tag.id}\n"
 
             let objectType =
                 let objectType =
@@ -133,13 +132,13 @@ let rec store object =
                     | CommitId _ -> "commit"
                     | TagId _ -> "tag"
 
-                sprintf "type %s\n" objectType
+                $"type {objectType}\n"
 
-            let name = sprintf "tag %s\n" tag.name
+            let name = $"tag {tag.name}\n"
 
             let tagger =
                 let (user, time) = tag.taggerInfo
-                sprintf "tagger %O %O\n" user time
+                $"tagger {user} {time}\n"
 
             let message = tag.message + "\n"
             object + objectType + name + tagger + "\n" + message
@@ -152,14 +151,15 @@ let rec store object =
             | Commit _ -> "commit"
             | Tag _ -> "tag"
 
-        sprintf "%s %i\x00" objectType content.Length
+        $"{objectType} {content.Length}\x00"
 
     header + content
 
 let hash object =
-    let score = object |> store |> System.Text.Encoding.ASCII.GetBytes
     let sha1 = System.Security.Cryptography.SHA1.Create()
-    let hash = sha1.ComputeHash score
+
+    let hash =
+        object |> store |> System.Text.Encoding.ASCII.GetBytes |> sha1.ComputeHash
 
     match object with
     | Tree _ -> Id hash |> TreeId
@@ -173,16 +173,12 @@ type Reference =
 
 type LightweightTag = string * ObjectID
 
-type LocalBranch = { branchName: string; id: Id<Commit> }
-
-type RemoteBranch =
-    { remoteName: string
-      branchName: string
-      id: Id<Commit> }
-
 type Branch =
-    | Heads of LocalBranch
-    | Remote of RemoteBranch
+    | Heads of {| branchName: string; id: Id<Commit> |}
+    | Remote of
+        {| remoteName: string
+           branchName: string
+           id: Id<Commit> |}
 
 let objects = Map<ObjectID, Object> []
 let refs: Branch list = []
