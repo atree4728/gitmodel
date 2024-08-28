@@ -32,7 +32,7 @@ type Id<'T> =
             match this with
             | Id bytes -> bytes
 
-        bytes |> Array.fold (fun str byte -> str + $"%02X{byte}") ""
+        bytes |> Array.fold (fun str byte -> str + $"%02x{byte}") ""
 
 type Blob = { content: string }
 
@@ -52,39 +52,40 @@ and Entry =
       name: string
       id: EntryId }
 
-and Tree = { children: Entry list }
+and Tree = { children: Entry array }
 
 type Commit =
-    { tree: Tree
-      parent: Id<Commit> list
+    { tree: Id<Tree>
+      parent: Id<Commit> array
       authorInfo: User * TimeInfo
       committerInfo: User * TimeInfo
       message: string }
 
 and AnnotatedTag =
     { name: string
-      id: ObjectID
+      id: ObjectId
       taggerInfo: User * TimeInfo
       message: string }
 
-and ObjectID =
-    | TreeId of Id<Tree>
+and ObjectId =
     | BlobId of Id<Blob>
+    | TreeId of Id<Tree>
     | CommitId of Id<Commit>
     | TagId of Id<AnnotatedTag>
 
 type Object =
-    | Tree of Tree
     | Blob of Blob
+    | Tree of Tree
     | Commit of Commit
     | Tag of AnnotatedTag
 
 let rec store object =
     let content =
         match object with
+        | Blob blob -> blob.content
         | Tree tree ->
             tree.children
-            |> List.map (fun entry ->
+            |> Array.map (fun entry ->
                 let kind =
                     match entry.kind with
                     | Directory -> 40000
@@ -95,21 +96,18 @@ let rec store object =
 
                 let id =
                     match entry.id with
-                    | EntryId.BlobId(Id id)
-                    | EntryId.TreeId(Id id) -> id |> string
+                    | EntryId.BlobId(Id bytes)
+                    | EntryId.TreeId(Id bytes) -> bytes |> Id
 
                 $"{kind} {entry.name}\x00{id}")
-            |> List.fold (fun str child -> str + child) ""
-        | Blob blob -> blob.content
+            |> Array.fold (fun str child -> str + child) ""
         | Commit commit ->
-            let tree =
-                let treeId = Tree commit.tree |> store
-                $"tree {treeId}\n"
+            let tree = $"tree {commit.tree}\n"
 
             let parents =
                 commit.parent
-                |> List.map (fun id -> $"parent {id}")
-                |> List.fold (fun str parent -> str + parent + "\n") ""
+                |> Array.map (fun id -> $"parent {id}")
+                |> Array.fold (fun str parent -> str + parent + "\n") ""
 
             let author =
                 let (user, time) = commit.authorInfo
@@ -122,13 +120,13 @@ let rec store object =
             let message = commit.message + "\n"
             tree + parents + author + committer + "\n" + message
         | Tag tag ->
-            let object = $"object {tag.id}\n"
+            let objectId = $"object {tag.id}\n"
 
             let objectType =
                 let objectType =
                     match tag.id with
-                    | TreeId _ -> "tree"
                     | BlobId _ -> "blob"
+                    | TreeId _ -> "tree"
                     | CommitId _ -> "commit"
                     | TagId _ -> "tag"
 
@@ -141,13 +139,13 @@ let rec store object =
                 $"tagger {user} {time}\n"
 
             let message = tag.message + "\n"
-            object + objectType + name + tagger + "\n" + message
+            objectId + objectType + name + tagger + "\n" + message
 
     let header =
         let objectType =
             match object with
-            | Tree _ -> "tree"
             | Blob _ -> "blob"
+            | Tree _ -> "tree"
             | Commit _ -> "commit"
             | Tag _ -> "tag"
 
@@ -155,23 +153,16 @@ let rec store object =
 
     header + content
 
-let hash object =
+let generateId object =
     let sha1 = System.Security.Cryptography.SHA1.Create()
-
-    let hash =
-        object |> store |> System.Text.Encoding.ASCII.GetBytes |> sha1.ComputeHash
+    let hash = store >> System.Text.Encoding.ASCII.GetBytes >> sha1.ComputeHash
+    let id = object |> hash
 
     match object with
-    | Tree _ -> Id hash |> TreeId
-    | Blob _ -> Id hash |> BlobId
-    | Commit _ -> Id hash |> CommitId
-    | Tag _ -> Id hash |> TagId
-
-type Reference =
-    | Object of ObjectID
-    | Reference of Reference
-
-type LightweightTag = string * ObjectID
+    | Blob _ -> id |> Id |> BlobId
+    | Tree _ -> id |> Id |> TreeId
+    | Commit _ -> id |> Id |> CommitId
+    | Tag _ -> id |> Id |> TagId
 
 type Branch =
     | Heads of {| branchName: string; id: Id<Commit> |}
@@ -180,5 +171,10 @@ type Branch =
            branchName: string
            id: Id<Commit> |}
 
-let objects = Map<ObjectID, Object> []
-let refs: Branch list = []
+type Reference =
+    | AnnotatedTag of
+        {| tagName: string
+           id: Id<AnnotatedTag> |}
+    | LightweightTag of {| tagName: string; id: ObjectId |}
+    | Branch of Branch
+    | Reference of Reference
