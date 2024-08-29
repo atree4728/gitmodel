@@ -1,6 +1,8 @@
 #load "GitModel.fsx"
 open GitModel
 
+let inline private (|Unreachable|) _ = failwith "unreachable!"
+
 // $ git init
 let mutable objects = Map<ObjectId, Object> []
 let mutable refs: Reference list = []
@@ -18,11 +20,7 @@ let tree =
             [| { kind = TextFile
                  name = "hello.txt"
                  id =
-                   let inner =
-                       match blob_id with
-                       | BlobId inner -> inner
-                       | _ -> failwith "unreachable!"
-
+                   let (BlobId inner | Unreachable inner) = blob_id
                    EntryId.BlobId inner } |] }
 
 let tree_id = generateId tree
@@ -37,11 +35,7 @@ let now = getTimeInfo ()
 let commit =
     Commit
         { tree =
-            let inner =
-                match tree_id with
-                | TreeId inner -> inner
-                | _ -> failwith "unreachable!"
-
+            let (TreeId inner | Unreachable inner) = tree_id
             inner
           parent = [||]
           authorInfo = atree, now
@@ -54,11 +48,7 @@ objects.Add(tree_id, tree)
 let mutable main =
     {| branchName = "main"
        id =
-        let inner =
-            match commit_id with
-            | CommitId inner -> inner
-            | _ -> failwith "unreachable!"
-
+        let (CommitId inner | Unreachable inner) = commit_id
         inner |}
     |> Heads
     |> Branch
@@ -76,18 +66,13 @@ let tag =
 let tag_id = generateId tag
 objects.Add(tag_id, tag)
 
-
 refs <-
     List.append
         refs
         [ AnnotatedTag
               {| tagName = "v0"
                  id =
-                  let inner =
-                      match tag_id with
-                      | TagId inner -> inner
-                      | _ -> failwith "unreachable!"
-
+                  let (TagId inner | Unreachable inner) = tag_id
                   inner |} ]
 
 // $ git tag "hello_txt" <blob_id>
