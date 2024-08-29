@@ -95,7 +95,6 @@ let rec store object =
                     | SubModule -> 160000
 
                 let (EntryId.BlobId(Id bytes) | EntryId.TreeId(Id bytes)) = entry.id
-                let id = Id bytes
 
                 $"{kind} {entry.name}\x00{id}")
             |> Array.fold (fun str child -> str + child) ""
